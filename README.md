@@ -66,38 +66,6 @@ Manual Review   Splink
      Merge / Output
 ```
 ---
-#   📁 Struktur Project
-
-Struktur project secara umum:
-
-Test-Duplikasi/
-│
-├── data/
-│   └── ...
-│
-├── notebooks/
-│   └── ...
-│
-├── src/
-│   ├── standardization.py
-│   ├── blocking.py
-│   ├── comparison.py
-│   ├── decision.py
-│   ├── pipeline.py
-│   └── splink_pipeline.py
-│
-├── tests/
-│   ├── test_standardization.py
-│   ├── test_blocking.py
-│   ├── test_comparison.py
-│   ├── test_decision.py
-│   └── test_pipeline.py
-│
-├── requirements.txt
-│
-└── README.md
-
----
  # 🛠️ Teknologi
 
 Project ini menggunakan beberapa teknologi dan library Python untuk mendukung proses eksperimen:
