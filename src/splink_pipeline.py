@@ -17,8 +17,8 @@ def build_splink_settings():
     try:
         from splink import SettingsCreator, block_on
         from splink.comparison_library import (
-            exact_match,
-            levenshtein_at_thresholds,
+            ExactMatch,
+            LevenshteinAtThresholds,
         )
     except ImportError as error:
         raise RuntimeError(
@@ -29,18 +29,18 @@ def build_splink_settings():
         link_type='dedupe_only',
         unique_id_column_name='record_id',
         comparisons=[
-            exact_match('email_std'),
-            exact_match('phone_digits_std'),
-            levenshtein_at_thresholds('name_key_std', [1, 2]),
-            levenshtein_at_thresholds('address_std', [2, 4]),
-            exact_match('city_std'),
-            exact_match('dob_std'),
+            ExactMatch('email_std'),
+            ExactMatch('phone_digits_std'),
+            LevenshteinAtThresholds('name_key_std', [1, 2]),
+            LevenshteinAtThresholds('address_std', [2, 4]),
+            ExactMatch('city_std'),
+            ExactMatch('dob_std'),
         ],
         blocking_rules_to_generate_predictions=[
             block_on('email_std'),
             block_on('phone_digits_std'),
-            block_on(['name_key_std', 'dob_std']),
-            block_on(['city_std', 'dob_std']),
+            block_on('name_key_std', 'dob_std'),
+            block_on('city_std', 'dob_std'),
         ],
     )
 
