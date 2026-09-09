@@ -1,0 +1,4 @@
+record_id_l,record_id_r,clerical_match_score
+0,1,1
+2,3,0
+0,2,0

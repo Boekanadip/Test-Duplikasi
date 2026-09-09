@@ -48,7 +48,7 @@ Perbedaan jumlah pair tidak otomatis berarti salah. Splink dapat menghasilkan pa
 
 ## 5. Label dan Training
 
-Gunakan `tests/fixtures/validation_pairs.csv` sebagai contoh format label non-PII, tetapi jangan menganggap fixture sintetis sebagai ground truth dataset produksi.
+Gunakan `tests/fixtures/reviewed_pair_labels.csv` sebagai contoh format pair label non-PII. File `validation_pairs.csv` berisi ringkasan evidence dan metrik fixture, bukan input training Splink. Jangan menganggap fixture sintetis sebagai ground truth dataset produksi.
 
 Untuk eksperimen nyata, siapkan reviewed labels yang terstratifikasi berdasarkan:
 
@@ -60,7 +60,39 @@ Untuk eksperimen nyata, siapkan reviewed labels yang terstratifikasi berdasarkan
 
 Setelah label cukup, jalankan estimasi parameter Splink dan evaluasi ulang threshold. Jangan langsung mengubah prediction menjadi merge.
 
-## 6. Validasi terhadap Baseline
+## 6. Training dari Reviewed Labels
+
+Training pair labels harus menggunakan record IDs internal Splink, bukan `customer_id`:
+
+```csv
+record_id_l,record_id_r,clerical_match_score
+0,1,1
+2,3,0
+```
+
+Jalankan training dan prediction:
+
+```powershell
+python -c "from src.splink_pipeline import train_splink_pipeline; train_splink_pipeline('data/raw/customers.csv', 'data/processed/reviewed_pair_labels.csv', 'data/processed/splink_trained_predictions.csv')"
+```
+
+`clerical_match_score=1` berarti reviewer menilai pasangan sebagai entity yang sama, sedangkan `0` berarti berbeda. Label harus berasal dari manual review yang terstratifikasi dan tidak boleh dibuat dari `customer_id` tanpa validasi independen.
+
+Evaluasi threshold dilakukan hanya pada reviewed pairs:
+
+```python
+from src.splink_pipeline import evaluate_splink_predictions
+
+metrics = evaluate_splink_predictions(
+  predictions,
+  "data/processed/reviewed_pair_labels.csv",
+  threshold=0.5,
+)
+```
+
+Threshold `0.5` di atas hanya contoh API. Threshold final harus dipilih dari validation set yang cukup besar, seimbang, dan representatif. Fixture sintetis menggunakan threshold kecil hanya untuk membuktikan alur training secara deterministik.
+
+## 7. Validasi terhadap Baseline
 
 Pertahankan dua jalur selama migrasi:
 
@@ -72,7 +104,7 @@ raw CSV
 
 Gunakan reviewed labels untuk membandingkan precision, recall, F1, false positives, dan false negatives. Investigasi perbedaan pair yang hanya muncul pada salah satu jalur.
 
-## 7. Tahap Produksi yang Belum Selesai
+## 8. Tahap Produksi yang Belum Selesai
 
 Adapter ini belum melakukan:
 
