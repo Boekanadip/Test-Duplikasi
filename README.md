@@ -64,9 +64,9 @@ Manual Review   Splink
            │
            ▼
      Merge / Output
-
-
-📁 Struktur Project
+```
+---
+#   📁 Struktur Project
 
 Struktur project secara umum:
 
@@ -97,4 +97,66 @@ Test-Duplikasi/
 │
 └── README.md
 
-Struktur dapat berubah mengikuti perkembangan eksperimen.
+``` Struktur dapat berubah mengikuti perkembangan eksperimen```
+
+---
+ # 🛠️ Teknologi
+
+Project ini menggunakan beberapa teknologi dan library Python untuk mendukung proses eksperimen:
+- Python
+- Pandas
+- NumPy
+- Splink
+- RapidFuzz / fuzzy matching
+- Pytest
+- Jupyter Notebook
+
+---
+# 🧪 Testing
+
+Project menyediakan pengujian terhadap komponen-komponen penting dari pipeline.
+Testing digunakan untuk memastikan bahwa perubahan pada satu komponen tidak menyebabkan proses lain menghasilkan output yang tidak sesuai.
+Contoh komponen yang dapat diuji:
+```BASH
+    standardization
+    blocking
+    comparison
+    decision
+    pipeline
+```
+Dengan adanya testing, workflow deduplikasi dapat dikembangkan secara lebih aman dan reproducible.
+---
+# 🚀 Instalasi
+
+Clone repository:
+```BASH
+git clone https://github.com/Boekanadip/Test-Duplikasi.git
+```
+Masuk ke directory:
+```BASH
+cd Test-Duplikasi
+```
+Buat virtual environment:
+```BASH
+python -m venv .venv
+```
+Aktifkan environment pada Windows:
+```BASH
+.venv\Scripts\activate
+```
+Install dependencies:
+```BASH
+pip install -r requirements.txt
+```
+---
+# ▶️ Menjalankan Eksperimen
+
+Eksperimen dapat dijalankan melalui notebook yang tersedia pada directory:
+```BASH
+notebooks/
+```
+Sedangkan implementasi reusable dari pipeline berada pada:
+```BASH
+src/
+```
+Pendekatan ini memisahkan eksplorasi eksperimen dengan kode yang digunakan kembali oleh pipeline.
