@@ -97,8 +97,6 @@ Test-Duplikasi/
 │
 └── README.md
 
-``` Struktur dapat berubah mengikuti perkembangan eksperimen```
-
 ---
  # 🛠️ Teknologi
 
