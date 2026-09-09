@@ -1,0 +1,6 @@
+first_name,last_name,email,phone_number,dob,address,city
+Alice,Smith,alice.smith@example.com,111-222-3333,1990-01-01,1 Main St,Springfield
+ALICE ,Smith,Alice.Smith@Example.com ,(111) 222-3333,1990-01-01,1 Main  St,Springfield
+Bob,Jones,shared@example.com,999-000-1111,1985-05-05,5 Oak Ave,Riverside
+Carol,White,shared@example.com,888-777-6666,1970-07-07,9 Pine Rd,Riverside
+Dave,Brown,dave.brown@example.com,555-444-3333,2000-12-12,12 Elm St,Lakeside

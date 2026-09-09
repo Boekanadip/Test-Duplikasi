@@ -27,3 +27,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# lokal
+PRD_Customer360_Entity_Resolution_Agent.md
+skill.md
