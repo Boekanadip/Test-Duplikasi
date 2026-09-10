@@ -49,16 +49,77 @@ def build_splink_settings():
     )
 
 
+SPLINK_TEXT_COLUMNS = (
+    'email_std',
+    'phone_digits_std',
+    'name_key_std',
+    'address_std',
+    'city_std',
+    'dob_std',
+)
+
+QUEUE_LABEL_COLUMNS = {
+    'left_row_index', 'right_row_index', 'review_label',
+}
+
+
 def prepare_splink_input(frame: pd.DataFrame) -> pd.DataFrame:
     """Standardize customer data and add the unique id required by Splink."""
-    standardized = standardize_customers(frame).reset_index(drop=True)
-    standardized.insert(0, 'record_id', standardized.index.astype('string'))
+    if 'record_id' in frame.columns:
+        standardized = frame.copy()
+    else:
+        standardized = standardize_customers(frame).reset_index(drop=True)
+        standardized.insert(0, 'record_id', standardized.index.astype('string'))
+    for column in SPLINK_TEXT_COLUMNS:
+        if column in standardized.columns:
+            standardized[column] = standardized[column].astype('string')
     return standardized
 
 
-def load_reviewed_labels(path: str | Path) -> pd.DataFrame:
+def _read_labels_csv(path: str | Path) -> pd.DataFrame:
+    """Read a label CSV with comma or semicolon delimiter."""
+    path = Path(path)
+    with path.open('r', encoding='utf-8') as handle:
+        header = handle.readline()
+    sep = ';' if header.count(';') > header.count(',') else ','
+    return pd.read_csv(path, sep=sep)
+
+
+def reviewed_queue_to_splink_labels(
+    queue_path: str | Path,
+    output_path: str | Path | None = None,
+) -> pd.DataFrame:
+    """Bridge manual_review_queue.csv to Splink pairwise-label format."""
+    queue = _read_labels_csv(queue_path)
+    missing = sorted(QUEUE_LABEL_COLUMNS - set(queue.columns))
+    if missing:
+        raise ValueError(f'Missing review-queue columns: {missing}')
+    reviewed = queue.dropna(subset=['review_label']).copy()
+    result = pd.DataFrame({
+        'record_id_l': reviewed['left_row_index'].astype('int64').astype('string'),
+        'record_id_r': reviewed['right_row_index'].astype('int64').astype('string'),
+        'clerical_match_score': pd.to_numeric(reviewed['review_label'], errors='coerce'),
+    })
+    result = load_reviewed_labels(result)
+    if output_path is not None:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        result.to_csv(output, index=False)
+    return result
+
+
+def load_reviewed_labels(path: str | Path | pd.DataFrame) -> pd.DataFrame:
     """Load reviewed pair labels without using customer_id as ground truth."""
-    labels = pd.read_csv(path)
+    if isinstance(path, pd.DataFrame):
+        labels = path.copy()
+    else:
+        labels = _read_labels_csv(path)
+    if QUEUE_LABEL_COLUMNS.issubset(set(labels.columns)):
+        labels = pd.DataFrame({
+            'record_id_l': labels['left_row_index'].astype('int64').astype('string'),
+            'record_id_r': labels['right_row_index'].astype('int64').astype('string'),
+            'clerical_match_score': pd.to_numeric(labels['review_label'], errors='coerce'),
+        })
     missing = sorted(REVIEWED_LABEL_COLUMNS - set(labels.columns))
     if missing:
         raise ValueError(f'Missing reviewed-label columns: {missing}')
@@ -102,10 +163,16 @@ def train_splink_pipeline(
     if unknown_ids:
         raise ValueError(f'Reviewed labels reference unknown record ids: {unknown_ids}')
 
+    from splink import block_on
+
     linker = _build_linker(standardized)
     linker._db_api.register_table(labels, 'reviewed_labels', overwrite=True)
+    linker.training.estimate_u_using_random_sampling(max_pairs=5_000_000, seed=42)
+    linker.training.estimate_probability_two_random_records_match(
+        deterministic_matching_rules=[block_on('email_std'), block_on('phone_digits_std')],
+        recall=0.8,
+    )
     linker.training.estimate_m_from_pairwise_labels('reviewed_labels')
-    linker.training.estimate_u_using_random_sampling(seed=42)
     predictions = linker.inference.predict().as_pandas_dataframe()
     if output_path is not None:
         output = Path(output_path)
@@ -114,13 +181,25 @@ def train_splink_pipeline(
     return predictions
 
 
+IDENTITY_COLUMNS = ('email_std', 'phone_digits_std', 'name_key_std')
+
+
 def evaluate_splink_predictions(
     predictions: pd.DataFrame,
     labels: pd.DataFrame,
     *,
     threshold: float = 0.5,
+    standardized: pd.DataFrame | None = None,
+    min_identity_agreement: int = 0,
 ) -> dict[str, float | int]:
-    """Evaluate a probability threshold against reviewed pair labels only."""
+    """Evaluate a probability threshold against reviewed pair labels only.
+
+    When ``standardized`` is provided the identity-field agreement guard
+    ``min_identity_agreement`` is enforced: a prediction counts as positive
+    only if the probability threshold is satisfied **and** at least that
+    many of (email, phone, name) agree exactly between the two records.
+    This guards against singleton weak-field (dob / city) over-confidence.
+    """
     if not 0 <= threshold <= 1:
         raise ValueError('threshold must be between 0 and 1.')
     required_predictions = {'record_id_l', 'record_id_r', 'match_probability'}
@@ -140,11 +219,33 @@ def evaluate_splink_predictions(
         axis=1,
     )
     prediction_pairs = predictions[['pair_key', 'match_probability']].drop_duplicates('pair_key')
-    reviewed_pairs = reviewed[['pair_key', 'clerical_match_score']]
+    reviewed_pairs = reviewed[['pair_key', 'clerical_match_score', 'record_id_l', 'record_id_r']]
     evaluated = reviewed_pairs.merge(prediction_pairs, on='pair_key', how='left')
     evaluated['match_probability'] = evaluated['match_probability'].fillna(0.0)
+
+    use_guard = standardized is not None and min_identity_agreement > 0
+    if use_guard:
+        std = standardized
+        id_left = std.set_index('record_id')[list(IDENTITY_COLUMNS)].rename(columns=lambda c: f'{c}_l')
+        id_right = std.set_index('record_id')[list(IDENTITY_COLUMNS)].rename(columns=lambda c: f'{c}_r')
+        evaluated['record_id_l'] = evaluated['record_id_l'].astype('string')
+        evaluated['record_id_r'] = evaluated['record_id_r'].astype('string')
+        evaluated = evaluated.merge(id_left, left_on='record_id_l', right_index=True, how='left')
+        evaluated = evaluated.merge(id_right, left_on='record_id_r', right_index=True, how='left')
+        identity_agreement = pd.Series(0, index=evaluated.index)
+        for col in IDENTITY_COLUMNS:
+            l = evaluated[f'{col}_l'].astype('string')
+            r = evaluated[f'{col}_r'].astype('string')
+            identity_agreement = identity_agreement + (l.eq(r) & l.notna() & r.notna()).astype(int)
+        evaluated['identity_agreement'] = identity_agreement
+    else:
+        evaluated['identity_agreement'] = 0
+
     actual = evaluated['clerical_match_score'].astype(int)
-    predicted = evaluated['match_probability'].ge(threshold).astype(int)
+    prob_ok = evaluated['match_probability'].ge(threshold)
+    id_ok = evaluated['identity_agreement'].ge(min_identity_agreement) if use_guard else True
+    predicted = (prob_ok & id_ok).astype(int)
+
     true_positive = int(((actual == 1) & (predicted == 1)).sum())
     false_positive = int(((actual == 0) & (predicted == 1)).sum())
     false_negative = int(((actual == 1) & (predicted == 0)).sum())
@@ -162,6 +263,56 @@ def evaluate_splink_predictions(
         'recall': recall,
         'f1': f1,
     }
+
+
+def cluster_predictions(
+    standardized: pd.DataFrame,
+    predictions: pd.DataFrame,
+    threshold: float = 0.5,
+) -> pd.DataFrame:
+    """Cluster pairwise predictions into entity groups using connected components."""
+    from splink.clustering import cluster_pairwise_predictions_at_threshold
+    from splink import DuckDBAPI
+    edges = predictions[['record_id_l', 'record_id_r', 'match_probability']].copy()
+    nodes = standardized[['record_id']].copy()
+    clustered = cluster_pairwise_predictions_at_threshold(
+        nodes=nodes,
+        edges=edges,
+        db_api=DuckDBAPI(),
+        node_id_column_name='record_id',
+        edge_id_column_name_left='record_id_l',
+        edge_id_column_name_right='record_id_r',
+        threshold_match_probability=threshold,
+    )
+    return clustered.as_pandas_dataframe()
+
+
+def tune_splink_threshold(
+    predictions: pd.DataFrame,
+    labels: pd.DataFrame,
+    *,
+    thresholds: list[float] | None = None,
+    standardized: pd.DataFrame | None = None,
+    min_identity_agreement: int = 0,
+) -> tuple[float, pd.DataFrame]:
+    """Find the probability threshold that maximizes F1 on reviewed labels."""
+    if thresholds is None:
+        thresholds = [round(x * 0.1, 1) for x in range(1, 10)]
+    rows: list[dict[str, float | int]] = []
+    for threshold in thresholds:
+        metrics = evaluate_splink_predictions(
+            predictions,
+            labels,
+            threshold=threshold,
+            standardized=standardized,
+            min_identity_agreement=min_identity_agreement,
+        )
+        metrics['threshold'] = threshold
+        rows.append(metrics)
+    summary = pd.DataFrame(rows)
+    summary = summary.sort_values(['f1', 'precision'], ascending=[False, False])
+    best = summary.iloc[0]
+    return float(best['threshold']), summary
 
 
 def run_splink_pipeline(

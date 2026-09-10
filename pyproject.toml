@@ -18,6 +18,7 @@ dev = [
 ]
 splink = [
     "splink>=4,<5",
+    "duckdb>=1,<2",
 ]
 
 [tool.pytest.ini_options]

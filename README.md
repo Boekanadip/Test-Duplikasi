@@ -119,7 +119,16 @@ pip install -r requirements.txt
 
 Eksperimen dapat dijalankan melalui notebook yang tersedia pada directory:
 ```BASH
-notebooks/
+notebook/
+```
+Contoh demo end-to-end (Splink train → predict → cluster → evaluate):
+```BASH
+# via CLI
+python -m src.splink_cli --input data/raw/crm_50000_customers_dirty_v3.csv \
+                         --labels data/processed/manual_review_queue.csv \
+                         --output-dir data/processed/splink_demo
+# via notebook
+# buka notebook/13_baseline_vs_splink_evaluation.ipynb (Run All)
 ```
 Sedangkan implementasi reusable dari pipeline berada pada:
 ```BASH
