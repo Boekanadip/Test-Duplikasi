@@ -189,16 +189,28 @@ Output: `merge_decisions.csv`, `merged_records.csv`, `entity_members.csv`, `revi
 
 ---
 
-## 7c. Review Queue UI (Streamlit)
+## 7c. Review Queue UI (Streamlit) — Workflow 4-Tab
 
 ```powershell
-review_ui.bat                                         # queue default complex_hard + 500 customers
-review_ui.bat data\processed\form_merge\review_queue.csv data\processed\form_clean.csv
+python -m streamlit run app\review_app.py
+# atau
+review_ui.bat
 ```
 
-Fitur: tampil pasangan kiri/kanan dengan highlight field agree (✅) vs beda (⚠️), tombol **Match / Not match / Skip**, label tersimpan ke SQLite (`data/processed/review_labels.db`), tombol Export menghasilkan `record_id_l,record_id_r,clerical_match_score` — format yang langsung dipakai `train_splink_pipeline`.
+Empat tab end-to-end:
 
-Loop: `review_queue.csv` → UI label → export → `train_splink_pipeline` retrain → threshold update → `src.merge` ulang.
+| Tab | Fungsi |
+|---|---|
+| **1. Input Baru** | upload CSV (Google-Form atau `first_name,...`), slider auto-merge threshold, tombol jalankan → import → baseline → Splink → concord merge → review_queue (dijalankan di dalam UI) |
+| **2. Review** | pasangan kiri/kanan dengan highlight agree (✅)/beda (⚠️), tombol Match/Not-match/Skip → label ke SQLite per-session |
+| **3. Hasil** | summary merge + `merged_records.csv` + entity members |
+| **4. Retrain** | label session → `split_labels` train/holdout → retrain Splink → threshold sweep (prec/recall/F1) → auto-threshold baru → model belajar terus dari data baru |
+
+- Label tersimpan per-session di `data/processed/review_labels.db`.
+- Setiap upload dibuatkan folder `data/processed/ui_sessions/session_<stamp>/`.
+- Data baru (10–500 baris) dijalankan penuh dalam UI; data besar (50k+) tetap lewat CLI.
+
+Loop belajar: upload baru → pipeline → review → label bertambah → tab 4 retrain → threshold update → merge ulang.
 
 ---
 

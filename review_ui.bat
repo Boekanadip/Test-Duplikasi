@@ -1,10 +1,8 @@
-"@echo off
-REM Launch the entity-resolution review UI.
+@echo off
+REM Launch the entity-resolution review UI (4-tab: Input/Review/Hasil/Retrain).
 REM Usage:
-REM   review_ui.bat                                    -- default complex_hard queue
-REM   review_ui.bat path\to\review_queue.csv path\to\customers.csv
-set QUEUE=%~1
-set CUST=%~2
-if "%QUEUE%"=="" set QUEUE=data\processed\complex_hard_merge\review_queue.csv
-if "%CUST%"=="" set CUST=data\processed\_complex_hard_500.csv
-python -m streamlit run app\review_app.py -- --input "%QUEUE%" --customers "%CUST%"
+REM   review_ui.bat              -- default DB
+REM   review_ui.bat custom.db    -- custom label DB
+set DB=%~1
+if "%DB%"=="" set DB=data\processed\review_labels.db
+python -m streamlit run app\review_app.py -- --db "%DB%"
