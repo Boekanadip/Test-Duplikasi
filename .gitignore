@@ -21,6 +21,7 @@ __pycache__/
 # Data
 data/raw/
 data/processed/
+data/skills/
 
 # OS
 .DS_Store
@@ -40,3 +41,14 @@ dist/
 
 # Local agent configuration
 .claude/
+.agents/
+agent/
+
+# Review DB
+scripts/_test_review.db
+
+# opencode skills lock
+skills-lock.json
+
+# Screenshots
+image/

@@ -20,6 +20,9 @@ splink = [
     "splink>=4,<5",
     "duckdb>=1,<2",
 ]
+review = [
+    "streamlit>=1.30,<2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -22,6 +22,7 @@ def build_splink_settings():
         from splink import SettingsCreator, block_on
         from splink.comparison_library import (
             ExactMatch,
+            JaroWinklerAtThresholds,
             LevenshteinAtThresholds,
         )
     except ImportError as error:
@@ -33,8 +34,8 @@ def build_splink_settings():
         link_type='dedupe_only',
         unique_id_column_name='record_id',
         comparisons=[
-            ExactMatch('email_std'),
-            ExactMatch('phone_digits_std'),
+            JaroWinklerAtThresholds('email_std', [0.95, 0.88]),
+            JaroWinklerAtThresholds('phone_digits_std', [0.95, 0.88]),
             LevenshteinAtThresholds('name_key_std', [1, 2]),
             LevenshteinAtThresholds('address_std', [2, 4]),
             ExactMatch('city_std'),
@@ -63,6 +64,27 @@ QUEUE_LABEL_COLUMNS = {
 }
 
 
+def _splink_normalize_identity(standardized: pd.DataFrame) -> pd.DataFrame:
+    """Canonicalize email/phone identifiers for Splink comparison.
+
+    Fixes false-negatives that standardization alone misses:
+      - googlemail.com is gmail.com (same mailbox, different domain alias)
+      - Indonesian country code: +62NNN... ≈ 0NNN...
+    Applies to Splink-derived columns only; raw columns stay untouched.
+    """
+    result = standardized.copy()
+    if 'email_std' in result.columns:
+        result['email_std'] = result['email_std'].astype('string').str.replace(
+            r'@googlemail\.com$', '@gmail.com', regex=True, case=False)
+    if 'phone_digits_std' in result.columns:
+        phone = result['phone_digits_std'].astype('string')
+        starts_country_code = phone.str.fullmatch(r'62\d{9,}')
+        result.loc[starts_country_code, 'phone_digits_std'] = (
+            '0' + phone.loc[starts_country_code].str.replace(r'^62', '', regex=True)
+        )
+    return result
+
+
 def prepare_splink_input(frame: pd.DataFrame) -> pd.DataFrame:
     """Standardize customer data and add the unique id required by Splink."""
     if 'record_id' in frame.columns:
@@ -73,7 +95,7 @@ def prepare_splink_input(frame: pd.DataFrame) -> pd.DataFrame:
     for column in SPLINK_TEXT_COLUMNS:
         if column in standardized.columns:
             standardized[column] = standardized[column].astype('string')
-    return standardized
+    return _splink_normalize_identity(standardized)
 
 
 def _read_labels_csv(path: str | Path) -> pd.DataFrame:
@@ -182,6 +204,58 @@ def train_splink_pipeline(
 
 
 IDENTITY_COLUMNS = ('email_std', 'phone_digits_std', 'name_key_std')
+
+
+def split_labels(
+    labels: str | Path | pd.DataFrame,
+    *,
+    train_frac: float = 0.7,
+    seed: int = 42,
+    stratify: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Stratified (or random) train/holdout split. Never returns an empty fold."""
+    assert 0 < train_frac < 1
+    frame = load_reviewed_labels(labels)
+    if len(frame) < 2:
+        raise ValueError('split_labels needs at least 2 labelled pairs.')
+    frame = frame.sample(frac=1, random_state=seed).reset_index(drop=True)
+    if stratify and frame['clerical_match_score'].nunique() > 1:
+        pos = frame[frame['clerical_match_score'] == 1].reset_index(drop=True)
+        neg = frame[frame['clerical_match_score'] == 0].reset_index(drop=True)
+        split_pos = max(1, int(len(pos) * train_frac))
+        split_neg = max(1, int(len(neg) * train_frac))
+        split_pos = min(split_pos, len(pos) - 1)
+        split_neg = min(split_neg, len(neg) - 1)
+        train = pd.concat([pos.iloc[:split_pos], neg.iloc[:split_neg]], ignore_index=True)
+        holdout = pd.concat([pos.iloc[split_pos:], neg.iloc[split_neg:]], ignore_index=True)
+        train = train.sample(frac=1, random_state=seed).reset_index(drop=True)
+        holdout = holdout.sample(frac=1, random_state=seed + 1).reset_index(drop=True)
+        return train, holdout
+    n_train = max(1, min(int(len(frame) * train_frac), len(frame) - 1))
+    return frame.iloc[:n_train].copy(), frame.iloc[n_train:].copy()
+
+
+def evaluate_splink_holdout(
+    predictions: pd.DataFrame,
+    holdout: str | Path | pd.DataFrame,
+    *,
+    threshold: float = 0.5,
+    standardized: pd.DataFrame | None = None,
+    min_identity_agreement: int = 0,
+) -> dict[str, float | int]:
+    """Evaluate only on a holdout fold that was never used for m-estimation."""
+    if isinstance(holdout, (str, Path)):
+        h = load_reviewed_labels(holdout)
+        if h.empty:
+            raise ValueError('holdout set is empty.')
+    else:
+        h = holdout
+    h = h.reset_index(drop=True)
+    if len(h) == 0:
+        raise ValueError('holdout set is empty.')
+    return evaluate_splink_predictions(predictions, h, threshold=threshold,
+                                       standardized=standardized,
+                                       min_identity_agreement=min_identity_agreement)
 
 
 def evaluate_splink_predictions(
