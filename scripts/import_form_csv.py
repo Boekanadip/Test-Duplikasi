@@ -19,12 +19,18 @@ FIELD_ALIASES = {
     "nama depan": "first_name",
     "nama pertama": "first_name",
     "first name": "first_name",
+    "nama": "first_name",
+    "nama lengkap": "first_name",
     "nama belakang": "last_name",
     "last name": "last_name",
+    "surname": "last_name",
     "email": "email",
     "email address": "email",
+    "e-mail": "email",
     "nomor telepon": "phone_number",
     "nomor hp": "phone_number",
+    "no telepon": "phone_number",
+    "no hp": "phone_number",
     "telepon": "phone_number",
     "phone": "phone_number",
     "phone number": "phone_number",
@@ -32,9 +38,13 @@ FIELD_ALIASES = {
     "tgl lahir": "dob",
     "birth date": "dob",
     "date of birth": "dob",
+    "dob": "dob",
     "alamat": "address",
+    "alamat lengkap": "address",
     "address": "address",
+    "desa": "address",
     "kota": "city",
+    "kota/kabupaten": "city",
     "city": "city",
 }
 
@@ -42,23 +52,39 @@ HEADER_SEPARATOR = " - "
 
 
 def _canonical_header(column: str) -> str:
-    key = column.strip().casefold()
-    if HEADER_SEPARATOR in key:
-        key = key.split(HEADER_SEPARATOR)[-1].strip()
-    return key
+    raw = column.strip().casefold()
+    # Google Forms often prefixes/annotates: "Pertanyaan 1 - Nama Depan"
+    if HEADER_SEPARATOR in raw:
+        raw = raw.split(HEADER_SEPARATOR)[-1].strip()
+    # Strip common parenthetical annotations: "Nama Lengkap (opsional)"
+    if "(" in raw:
+        raw = raw.split("(")[0].strip()
+    # Strip Google Forms "(wajib)" marker and extra dash
+    raw = raw.replace("-", " ").strip()
+    raw = " ".join(raw.split())
+    return raw
+
+
+REQUIRED = {"first_name", "last_name", "email", "phone_number", "dob", "address", "city"}
 
 
 def import_form_csv(path: str | Path, *, timestamp_column: str = "Timestamp") -> pd.DataFrame:
     """Normalize a form-response CSV into the pipeline column contract.
 
     ``timestamp_column`` is dropped if present (it is bookkeeping, not identity).
-    Raises ``ValueError`` when a required field has no mapped alias so the caller
-    knows exactly which header is missing.
+    Raises ``ValueError`` with a helpful message listing the headers that were
+    provided and the set of required columns (`first_name, last_name, email,
+    phone_number, dob, address, city`).
+
+    Dtypes: all required columns are read as ``string`` (nullable) to avoid
+    float/int coercion of phone numbers and dates; duplicates on the target name
+    keep the last occurrence (Google Forms checkboxes quirk).
     """
-    frame = pd.read_csv(path)
-    missing = [c for c in (frame.columns) if c.strip().casefold() == timestamp_column.strip().casefold()]
-    if missing:
-        frame = frame.drop(columns=missing)
+    frame = pd.read_csv(path, dtype="string", keep_default_na=True)
+    hdrs = list(frame.columns)
+    missing_ts = [c for c in hdrs if c.strip().casefold() == timestamp_column.strip().casefold()]
+    if missing_ts:
+        frame = frame.drop(columns=missing_ts)
 
     rename: dict[str, str] = {}
     for column in frame.columns:
@@ -69,10 +95,21 @@ def import_form_csv(path: str | Path, *, timestamp_column: str = "Timestamp") ->
 
     frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
 
-    required = {"first_name", "last_name", "email", "phone_number", "dob", "address", "city"}
-    present = required & set(frame.columns)
-    if present != required:
-        raise ValueError(f"Missing required fields after mapping: {sorted(required - present)}")
+    for c in REQUIRED:
+        if c in frame.columns:
+            frame[c] = frame[c].astype("string").apply(lambda s: s.strip() if pd.notna(s) else s)
+
+    present = REQUIRED & set(frame.columns)
+    if present != REQUIRED:
+        missing = sorted(REQUIRED - present)
+        available = ", ".join(f"'{c.strip()}'" for c in hdrs if c)[:480]
+        expected = ", ".join(sorted(REQUIRED))
+        raise ValueError(
+            "Missing required fields after mapping: "
+            f"{missing}. Got headers: [{available}]. "
+            f"Expected (aliases allowed, case-insensitive): {{{expected}}}. "
+            "Accepted header variants: " + ", ".join(f"'{k}' -> {v}" for k, v in sorted(FIELD_ALIASES.items())[:12])
+        )
     return frame
 
 

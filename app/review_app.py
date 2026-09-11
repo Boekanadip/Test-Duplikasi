@@ -169,14 +169,32 @@ def tab_input() -> None:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             session = SESSIONS / f"session_{stamp}"
             session.mkdir(parents=True, exist_ok=True)
-            with st.spinner("Standardize → blocking → baseline → Splink → merge ..."):
-                upload_dir = session / "_tmp_form.csv"
-                upload_dir.write_bytes(uploaded.getbuffer())
-                info = run_session(uploaded.getvalue(), session)
-            st.session_state.update(info)
-            st.success("Pipeline selesai. Buka tab Review.")
-            st.json({k: (str(v) if isinstance(v, Path) else v)
-                     for k, v in info["merge_summary"].items()})
+            upload_dir = session / "_tmp_form.csv"
+            upload_dir.write_bytes(uploaded.getbuffer())
+            try:
+                with st.spinner("Standardize → blocking → baseline → Splink → merge ..."):
+                    info = run_session(uploaded.getvalue(), session)
+                st.session_state.update(info)
+                st.success("Pipeline selesai. Buka tab Review.")
+                st.json({k: (str(v) if isinstance(v, Path) else v)
+                         for k, v in info["merge_summary"].items()})
+            except ValueError as e:
+                st.error(str(e))
+                import traceback as _tb
+                st.code(_tb.format_exc())
+                st.info(
+                    "Header yang diharapkan (boleh varian kata, case-insensitive):\n"
+                    "- first_name: `first name / nama depan / nama`\n"
+                    "- last_name: `last name / nama belakang`\n"
+                    "- email: `email`\n"
+                    "- phone_number: `phone number / nomor telepon / no telepon / phone`\n"
+                    "- dob: `dob / tanggal lahir / tgl lahir / date of birth`\n"
+                    "- address: `address / alamat`\n"
+                    "- city: `city / kota`\n"
+                    "AWALAN `Pertanyaan N - ...` di Google Forms otomatis dipotong.\n"
+                    "Gunakan contoh: `Nota/f/fixtures/customers_sample.csv` sebagai referensi."
+                )
+                return
             return
 
     info = st.session_state.get("session")
