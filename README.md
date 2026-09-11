@@ -1,137 +1,174 @@
 # Test-Duplikasi
 
-Eksperimen sistem deduplikasi dan entity resolution dengan menggabungkan pendekatan manual/deterministic matching, fuzzy matching, blocking, serta probabilistic record linkage menggunakan Splink.
+Eksperimen sistem deduplikasi dan entity resolution yang menggabungkan pendekatan manual/deterministic matching, fuzzy matching, blocking, probabilistic record linkage (Splink), serta workflow review manusia — sampai keputusan merge dengan skor concord.
 
-Project ini dibuat untuk mempelajari bagaimana data yang memiliki kemungkinan merepresentasikan entity yang sama dapat diidentifikasi, dibandingkan, dievaluasi, dan diproses secara sistematis sebelum dilakukan penggabungan record.
+Project ini berfokus pada **entity resolution**: mengidentifikasi record yang merepresentasikan entity/customer yang sama sebelum digabung — bukan sekadar menghapus baris identik.
 
 ---
 
 ## 🎯 Tujuan Project
 
-Tujuan utama project ini adalah mempelajari dan membangun workflow deduplikasi data yang:
-
-- mampu mendeteksi record yang identik maupun memiliki variasi penulisan;
-- membedakan antara exact duplicate dan potential duplicate;
-- mengurangi jumlah perbandingan record menggunakan blocking;
-- menggabungkan deterministic matching dengan fuzzy matching;
-- mengeksplorasi probabilistic record linkage menggunakan Splink;
-- menyediakan proses review sebelum record benar-benar di-merge;
-- dapat dievaluasi menggunakan data yang telah direview;
-- dapat diuji dan dikembangkan menjadi pipeline yang lebih scalable.
-
-Project ini lebih berfokus pada **entity resolution** daripada sekadar menghapus baris yang memiliki nilai sama.
+- Mendeteksi record identik maupun yang punya variasi penulisan (typo, casing, abbreviation, name-order, email/phone format).
+- Membedakan exact duplicate dan potential duplicate.
+- Mengurangi perbandingan N(N-1)/2 menggunakan blocking.
+- Menggabungkan deterministic matching (baseline transparan) dengan probabilistic record linkage (Splink).
+- Menyediakan proses review manusia sebelum merge.
+- Evaluasi tanpa data leakage (train/holdout split).
+- Mendukung input data baru secara terus-menerus via UI → model belajar dari label baru.
 
 ---
 
-# 🧩 Konsep Utama
-
-Secara umum, workflow project dapat digambarkan sebagai berikut:
+## 🧩 Arsitektur Pipeline
 
 ```text
-Raw Data
+Form / CSV (Google-Form atau first_name,...)
    │
    ▼
-Data Understanding
+Import & Standardize  (src/standardization.py, scripts/import_form_csv.py)
    │
    ▼
-Data Quality Analysis
-   │
-   ▼
-Standardization
-   │
-   ▼
-Deterministic Matching
-   │
-   ▼
-Fuzzy Matching
-   │
-   ▼
-Blocking / Candidate Generation
-   │
-   ├───────────────┐
-   ▼               ▼
-Manual Review   Splink
-   │               │
-   └───────┬───────┘
-           ▼
-     Match Decision
-           │
-           ▼
-      Evaluation
-           │
-           ▼
-    Error Analysis
-           │
-           ▼
-     Merge / Output
+Blocking / Candidate Generation   ← score/split
+   │                (src/blocking.py)
+   ├──────────────────────┐
+   ▼                      ▼
+Baseline Deterministic   Splink (probabilistic)
+ src/decision.py         src/splink_pipeline.py
+   │                      │
+   └─────────┬────────────┘
+            ▼
+    Concord Score (src/merge.py)
+     0.30·baseline + 0.40·splink + 0.30·identity
+      ≥0.95 → auto_merge │ 0.15–0.95 → review │ <0.15 → not_match
+            │
+            ▼
+    Review UI (app/review_app.py) — 4 tab
+            │
+            ▼
+    Retrain Splink + tune threshold (holdout) → merge ulang
 ```
----
- # 🛠️ Teknologi
 
-Project ini menggunakan beberapa teknologi dan library Python untuk mendukung proses eksperimen:
-- Python
-- Pandas
-- NumPy
-- Splink
-- RapidFuzz / fuzzy matching
+---
+
+## 🛠️ Teknologi
+
+- Python 3.11+
+- Pandas / NumPy
+- Splink (probabilistic record linkage) — optional
+- Streamlit (review UI) — optional
 - Pytest
 - Jupyter Notebook
 
 ---
-# 🧪 Testing
 
-Project menyediakan pengujian terhadap komponen-komponen penting dari pipeline.
-Testing digunakan untuk memastikan bahwa perubahan pada satu komponen tidak menyebabkan proses lain menghasilkan output yang tidak sesuai.
-Contoh komponen yang dapat diuji:
-```BASH
-    standardization
-    blocking
-    comparison
-    decision
-    pipeline
+## 📁 Struktur
+
+```text
+src/                       implementasi reusable pipeline
+  pipeline.py              baseline pipeline (standardize → block → compare → decide)
+  standardization.py       normalisasi identity fields
+  blocking.py              candidate generation
+  comparison.py            agreement vectors
+  decision.py              match_decision (candidate/high-conf)
+  splink_pipeline.py       Splink adapter (+ split_labels, holdout eval)
+  merge.py                 concord score + auto/review/not_match
+scripts/                   eksperimen & tool
+  import_form_csv.py       header Google-Form → kolom pipeline
+  fake_data_builder.py     dataset sintetis P1–P7 + decoy
+  splink_learning_test.py  bukti Splink belajar dari label
+  complex_pattern_test.py  tes pola duplikat bertingkat
+  complex_hard_test.py     tes P1–P7 + merge concord
+  form_merge_test.py       alur form → import → merge → validasi
+app/review_app.py          Streamlit 4-tab (Input/Review/Hasil/Retrain)
+docs/                      tutorial, learning findings, policy, migration
+tests/                     unit + integration
 ```
-Dengan adanya testing, workflow deduplikasi dapat dikembangkan secara lebih aman dan reproducible.
+
 ---
-# 🚀 Instalasi
 
-Clone repository:
-```BASH
-git clone https://github.com/Boekanadip/Test-Duplikasi.git
-```
-Masuk ke directory:
-```BASH
-cd Test-Duplikasi
-```
-Buat virtual environment:
-```BASH
+## 🚀 Instalasi
+
+```bash
 python -m venv .venv
-```
-Aktifkan environment pada Windows:
-```BASH
-.venv\Scripts\activate
-```
-Install dependencies:
-```BASH
+.venv\Scripts\activate          # Windows
 pip install -r requirements.txt
+# opsional
+pip install -e ".[splink]"      # Splink pipeline
+pip install -e ".[review]"      # Streamlit UI
 ```
----
-# ▶️ Menjalankan Eksperimen
 
-Eksperimen dapat dijalankan melalui notebook yang tersedia pada directory:
-```BASH
-notebook/
+---
+
+## ▶️ Menggunakan
+
+### 1. Baseline deterministik (CLI)
+
+```bash
+python -m src.cli --input data/raw/crm_50000_customers_dirty_v3.csv --output data/processed/candidate_decisions.csv
 ```
-Contoh demo end-to-end (Splink train → predict → cluster → evaluate):
-```BASH
-# via CLI
+
+### 2. Splink (train → predict → cluster → evaluate)
+
+```bash
 python -m src.splink_cli --input data/raw/crm_50000_customers_dirty_v3.csv \
-                         --labels data/processed/manual_review_queue.csv \
+                         --labels data/processed/splink_reviewed_labels.csv \
                          --output-dir data/processed/splink_demo
-# via notebook
-# buka notebook/13_baseline_vs_splink_evaluation.ipynb (Run All)
 ```
-Sedangkan implementasi reusable dari pipeline berada pada:
-```BASH
-src/
+
+### 3. Merge concord (auto-merge / review / not-match)
+
+```bash
+python -m src.merge --input <customers.csv> --predictions <splink_predictions.csv> \
+                    --output-dir <dir> --auto-threshold 0.95 --review-threshold 0.15
 ```
-Pendekatan ini memisahkan eksplorasi eksperimen dengan kode yang digunakan kembali oleh pipeline.
+
+### 4. Review UI (4 tab: Input Baru → Review → Hasil → Retrain)
+
+```bash
+review_ui.bat          # atau: streamlit run app\review_app.py
+```
+
+Tab 1 menerima upload CSV (Google-Form atau format `first_name,last_name,...`), menjalankan pipeline penuh di dalam UI (10–500 baris), menghasilkan `review_queue.csv`. Tab 2 untuk labeling manusia. Tab 4 me-retrain Splink dari label baru dan mencari threshold terbaik di holdout.
+
+---
+
+## 🧪 Anti-Leakage (penting)
+
+Evaluasi Splink **selalu memakai holdout fold**, tidak pernah pair yang dipakai training:
+
+```python
+from src.splink_pipeline import split_labels, evaluate_splink_holdout, train_splink_pipeline
+
+train, holdout = split_labels(labels)                 # stratified, tidak overlap
+predictions = train_splink_pipeline(input, train)     # m/u hanya dari train
+metrics = evaluate_splink_holdout(predictions, holdout, threshold=0.7)
+```
+
+---
+
+## 📊 Hasil Ringkas (fabricated, ground truth diketahui)
+
+| Metode | Set | TP | FP | Precision | Recall |
+|---|---|---|---|---|---|
+| Baseline decisioning | 500 kompleks (70 true + 30 decoy) | 70 | 36 | 0.66 | 1.00 |
+| Auto-merge concord (0.95) | P1–P7 (13 true + 30 decoy) | 5 | 0 | 1.00 | 0.38 |
+| Review band (0.15–0.95) | P1–P7 | 8 TP + 33 FP diserahkan ke manusia | — | — | +0.62 |
+| Merge concord | form/test 300 (40 true) | 40 | 0 | 1.00 | 1.00 |
+
+Detail: `docs/TESTING_TUTORIAL.md`, `docs/SP_LINK_LEARNING_FINDINGS.md`.
+
+---
+
+## 🧪 Testing
+
+```bash
+python -m pytest tests/ -q
+```
+
+---
+
+## 📄 Dokumentasi
+
+- `docs/TESTING_TUTORIAL.md` — tutorial cara test, alur, anti-leakage
+- `docs/SP_LINK_LEARNING_FINDINGS.md` — apakah Splink belajar dari label
+- `docs/matching_policy.md` — policy baseline
+- `docs/splink_migration.md` — migrasi baseline → Splink
